@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import {
   createMediaAnimation,
   decodeGifFile,
@@ -111,7 +112,7 @@ export type MediaDrawOptions = {
   height?: number;
 };
 
-export type MediaAsset = ClockfaceFileInputValue | PreparedMediaAsset;
+export type MediaAsset = string | ClockfaceFileInputValue | PreparedMediaAsset;
 
 export type PreparedImageAsset = {
   type: 'image';
@@ -212,7 +213,7 @@ export class Clockface {
   private persistenceKey = '';
   private persistedState: ClockfacePersistedState;
   private persistenceReady: Promise<void>;
-  private readonly mediaCache = new WeakMap<object, MediaCacheEntry>();
+  private readonly mediaCache = new Map<object | string, MediaCacheEntry>();
 
   static configurePersistence(store: ClockfacePersistenceStore | undefined) {
     persistenceStore = store;
@@ -542,7 +543,7 @@ function normalizeFriendlyInput(inputDefinition: FriendlyClockfaceInput): Clockf
 function createCanvas(
   size: number,
   buffer: ClockfacePixelBuffer,
-  mediaCache: WeakMap<object, MediaCacheEntry>
+  mediaCache: Map<object | string, MediaCacheEntry>
 ): ClockfaceCanvas {
   return {
     get size() {
@@ -778,16 +779,16 @@ function drawFrameIntoBuffer(
 }
 
 function isPreparedMediaAsset(asset: MediaAsset): asset is PreparedMediaAsset {
-  return 'type' in asset && (asset.type === 'image' || asset.type === 'gif' || asset.type === 'video') && (
+  return typeof asset === 'object' && 'type' in asset && (asset.type === 'image' || asset.type === 'gif' || asset.type === 'video') && (
     'frame' in asset || 'animation' in asset
   );
 }
 
 function getPreparedMediaAsset(
-  asset: ClockfaceFileInputValue,
+  asset: string | ClockfaceFileInputValue,
   type: MediaType,
   resolution: number,
-  mediaCache: WeakMap<object, MediaCacheEntry>
+  mediaCache: Map<object | string, MediaCacheEntry>
 ) {
   const cached = mediaCache.get(asset);
 
@@ -799,7 +800,7 @@ function getPreparedMediaAsset(
     return undefined;
   }
 
-  const promise = prepareMediaAsset(asset, type, resolution)
+  const promise = prepareMediaAsset(normalizeMediaAsset(asset, type), type, resolution)
     .then((prepared) => {
       mediaCache.set(asset, {
         status: 'ready',
@@ -822,6 +823,59 @@ function getPreparedMediaAsset(
   });
 
   return undefined;
+}
+
+function normalizeMediaAsset(asset: string | ClockfaceFileInputValue, type: MediaType): ClockfaceFileInputValue {
+  if (typeof asset !== 'string') {
+    return asset;
+  }
+
+  const dataUrl = parseDataUrl(asset);
+  const extension = getMediaTypeExtension(dataUrl.type, type);
+
+  return {
+    name: `asset.${extension}`,
+    type: dataUrl.type,
+    size: dataUrl.bytes.byteLength,
+    bytes: dataUrl.bytes
+  };
+}
+
+function parseDataUrl(value: string) {
+  const match = value.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+
+  if (!match) {
+    throw new Error('Imported media assets must be data URLs.');
+  }
+
+  const mimeType = match[1] || 'application/octet-stream';
+  const encoded = match[3] ?? '';
+  const bytes = match[2]
+    ? decodeBase64(encoded)
+    : new TextEncoder().encode(decodeURIComponent(encoded));
+
+  return {
+    type: mimeType,
+    bytes
+  };
+}
+
+function decodeBase64(value: string) {
+  if (typeof atob === 'function') {
+    return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+  }
+
+  return Uint8Array.from(Buffer.from(value, 'base64'));
+}
+
+function getMediaTypeExtension(mimeType: string, type: MediaType) {
+  const subtype = mimeType.split('/')[1]?.replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+  if (subtype) {
+    return subtype === 'jpeg' ? 'jpg' : subtype;
+  }
+
+  return type === 'image' ? 'png' : type;
 }
 
 async function prepareMediaAsset(

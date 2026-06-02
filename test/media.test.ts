@@ -163,4 +163,31 @@ describe('media helpers', () => {
     expect(clockface.buffer[0]).toEqual([0, 0, 0]);
     expect(clockface.buffer[3]).toEqual([0, 0, 255]);
   });
+
+  it('accepts imported data URL media assets', async () => {
+    const bytes = new Uint8Array(
+      await sharp({
+        create: {
+          width: 1,
+          height: 1,
+          channels: 3,
+          background: { r: 255, g: 0, b: 0 }
+        }
+      })
+        .png()
+        .toBuffer()
+    );
+    const dataUrl = `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`;
+    const clockface = defineClockface({
+      resolution: 1,
+      render: () => undefined
+    });
+
+    await clockface.ready;
+    clockface.context.canvas.media(dataUrl, 'image');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    clockface.context.canvas.media(dataUrl, 'image');
+
+    expect(clockface.buffer[0]).toEqual([255, 0, 0]);
+  });
 });
