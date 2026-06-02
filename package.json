@@ -1,0 +1,55 @@
+{
+  "name": "@pixoopal/clockface",
+  "version": "0.1.1",
+  "description": "Clockface SDK for PixooPal.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./media": {
+      "types": "./dist/media.d.ts",
+      "import": "./dist/media.js"
+    },
+    "./gif": {
+      "types": "./dist/gif.d.ts",
+      "import": "./dist/gif.js"
+    },
+    "./image": {
+      "types": "./dist/image.d.ts",
+      "import": "./dist/image.js"
+    },
+    "./bitmap-text": {
+      "types": "./dist/bitmap-text.d.ts",
+      "import": "./dist/bitmap-text.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "ci": "npm run check && npm run build && npm test"
+  },
+  "dependencies": {
+    "gifuct-js": "^2.1.2",
+    "pureimage": "^0.4.18",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.2"
+  },
+  "peerDependenciesMeta": {
+    "sharp": {
+      "optional": true
+    }
+  }
+}
