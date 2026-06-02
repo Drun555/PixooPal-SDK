@@ -508,7 +508,7 @@ function createInput(
     type,
     id,
     friendlyName,
-    isSetting: true,
+    isSetting: false,
     ...options
   };
 }
