@@ -48,6 +48,16 @@ describe('Clockface', () => {
     expect(clockface.buffer[3]).toEqual([0, 255, 0]);
   });
 
+  it('exposes the configured frame queue size', () => {
+    const clockface = defineClockface({
+      resolution: 1,
+      frameQueueSize: 1,
+      render: () => undefined
+    });
+
+    expect(clockface.frameQueueSize).toBe(1);
+  });
+
   it('draws primitives with clipping, stroke, fill and opacity', async () => {
     const clockface = defineClockface({
       resolution: 5,

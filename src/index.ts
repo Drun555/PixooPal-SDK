@@ -79,6 +79,7 @@ export type ClockfaceOptions = {
   inputs: ClockfaceInputRow[];
   updateIntervalMs?: number;
   getUpdateIntervalMs?: ClockfaceUpdateIntervalFunction;
+  frameQueueSize?: number;
   persistedState?: ClockfacePersistedState;
   init: ClockfaceLifecycleFunction;
   main: ClockfaceLifecycleFunction;
@@ -179,6 +180,7 @@ export type FriendlyClockfaceOptions<TSchema extends DataSchema> = {
   inputs?: FriendlyClockfaceInput<InferData<TSchema>>[] | FriendlyClockfaceInput<InferData<TSchema>>[][];
   interval?: number;
   getInterval?: (context: FriendlyClockfaceContext<InferData<TSchema>>) => number;
+  frameQueueSize?: number;
   setup?: (context: FriendlyClockfaceContext<InferData<TSchema>>) => void | Promise<void>;
   render: (context: FriendlyClockfaceContext<InferData<TSchema>>) => void | Promise<void>;
   start?: (context: FriendlyClockfaceContext<InferData<TSchema>>) => void | Promise<void>;
@@ -204,6 +206,7 @@ export class Clockface {
   readonly inputRows: ClockfaceInput[][];
   readonly buffer: ClockfacePixelBuffer;
   readonly ready: Promise<void>;
+  readonly frameQueueSize: number;
   private readonly defaultUpdateIntervalMs: number;
   private readonly getUpdateIntervalMsFn?: ClockfaceUpdateIntervalFunction;
   private readonly initFn: ClockfaceLifecycleFunction;
@@ -225,6 +228,7 @@ export class Clockface {
     inputs,
     updateIntervalMs = 0,
     getUpdateIntervalMs,
+    frameQueueSize,
     persistedState = {},
     init,
     main,
@@ -238,6 +242,7 @@ export class Clockface {
     this.buffer = createBuffer(resolution);
     this.defaultUpdateIntervalMs = normalizeUpdateInterval(updateIntervalMs);
     this.getUpdateIntervalMsFn = getUpdateIntervalMs;
+    this.frameQueueSize = normalizeFrameQueueSize(frameQueueSize);
     this.initFn = init;
     this.mainFn = main;
     this.startFn = start;
@@ -384,6 +389,14 @@ function normalizeUpdateInterval(updateIntervalMs: number) {
   return Math.max(50, Math.round(updateIntervalMs));
 }
 
+function normalizeFrameQueueSize(frameQueueSize: number | undefined) {
+  if (frameQueueSize === undefined || !Number.isFinite(frameQueueSize)) {
+    return 5;
+  }
+
+  return Math.max(1, Math.round(frameQueueSize));
+}
+
 async function readPersistedClockface(key: string) {
   if (!persistenceStore) {
     return {
@@ -489,6 +502,7 @@ export function defineClockface<TSchema extends DataSchema = Record<string, neve
     inputs: normalizeFriendlyInputs(options.inputs ?? []),
     updateIntervalMs: options.interval,
     getUpdateIntervalMs: options.getInterval as ClockfaceUpdateIntervalFunction | undefined,
+    frameQueueSize: options.frameQueueSize,
     init: async (context) => {
       await options.setup?.(context as FriendlyClockfaceContext<InferData<TSchema>>);
     },
