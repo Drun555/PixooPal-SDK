@@ -1,7 +1,7 @@
-import * as PImage from 'pureimage';
-import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PNG } from 'pngjs';
 import emojiManifest from './assets/emojis/dotto-emoji.json' with { type: 'json' };
 
 export type BitmapTextColor = [number, number, number];
@@ -84,7 +84,7 @@ type LoadedBitmapFont = {
   name: string;
   atlasPath: string;
   font: BitmapFont;
-  atlasReady?: Promise<BitmapAtlas>;
+  atlas?: BitmapAtlas;
 };
 
 export type BitmapTextAssets = {
@@ -104,12 +104,12 @@ const textSegmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
 
 let bitmapTextAssets = createDefaultAssets();
 let bitmapFonts: Map<string, LoadedBitmapFont> | undefined;
-let emojiAtlasReady: Promise<BitmapAtlas> | undefined;
+let emojiAtlas: BitmapAtlas | undefined;
 
 export function configureBitmapTextAssets(assets: BitmapTextAssets) {
   bitmapTextAssets = createDefaultAssets(assets);
   bitmapFonts = undefined;
-  emojiAtlasReady = undefined;
+  emojiAtlas = undefined;
 }
 
 export function getBitmapTextLineHeight(fontName = DEFAULT_FONT_NAME) {
@@ -134,7 +134,7 @@ export function measureBitmapText(text: string, fontName = DEFAULT_FONT_NAME) {
   return tokenizeBitmapText(text, bitmapFont).reduce((width, token) => width + token.xadvance, 0);
 }
 
-export async function drawBitmapText({
+export function drawBitmapText({
   buffer,
   size,
   text,
@@ -150,16 +150,16 @@ export async function drawBitmapText({
   }
 }: DrawBitmapTextOptions) {
   const bitmapFont = getBitmapFont(fontName);
-  const atlas = await ensureAtlasReady(bitmapFont);
+  const atlas = ensureAtlasReady(bitmapFont);
   const tokens = tokenizeBitmapText(text, bitmapFont.font);
   const renderHeight = getTokenRenderHeight(tokens, bitmapFont.font);
-  let emojiAtlas: BitmapAtlas | undefined;
+  let loadedEmojiAtlas: BitmapAtlas | undefined;
   let cursorX = x;
 
   for (const token of tokens) {
     if (token.type === 'emoji') {
-      emojiAtlas ??= await ensureEmojiAtlasReady();
-      drawEmoji(buffer, size, emojiAtlas, token.emoji, cursorX, y, clip);
+      loadedEmojiAtlas ??= ensureEmojiAtlasReady();
+      drawEmoji(buffer, size, loadedEmojiAtlas, token.emoji, cursorX, y, clip);
       cursorX += token.xadvance;
       continue;
     }
@@ -247,27 +247,29 @@ function setFlatPixel(buffer: number[], size: number, x: number, y: number, colo
 }
 
 function ensureAtlasReady(bitmapFont: LoadedBitmapFont) {
-  if (!bitmapFont.atlasReady) {
-    bitmapFont.atlasReady = decodePng(bitmapFont.atlasPath);
+  if (!bitmapFont.atlas) {
+    bitmapFont.atlas = decodePng(bitmapFont.atlasPath);
   }
 
-  return bitmapFont.atlasReady;
+  return bitmapFont.atlas;
 }
 
 function ensureEmojiAtlasReady() {
-  if (!emojiAtlasReady) {
-    emojiAtlasReady = decodePng(bitmapTextAssets.emojiAtlasPath);
+  if (!emojiAtlas) {
+    emojiAtlas = decodePng(bitmapTextAssets.emojiAtlasPath);
   }
 
-  return emojiAtlasReady;
+  return emojiAtlas;
 }
 
 function decodePng(path: string) {
-  return PImage.decodePNGFromStream(createReadStream(path)).then((image: ReturnType<typeof PImage.make>) => ({
+  const image = PNG.sync.read(readFileSync(path));
+
+  return {
     width: image.width,
     height: image.height,
-    data: image.data as Uint8Array
-  }));
+    data: image.data
+  };
 }
 
 function tokenizeBitmapText(text: string, bitmapFont: BitmapFont) {

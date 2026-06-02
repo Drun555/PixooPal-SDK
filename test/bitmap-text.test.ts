@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { defineClockface } from '../src/index.js';
 import { drawBitmapText, getBitmapTextRenderHeight, measureBitmapText } from '../src/bitmap-text.js';
 
 describe('bitmap text helpers', () => {
@@ -18,5 +19,19 @@ describe('bitmap text helpers', () => {
     });
 
     expect(buffer.some((value) => value !== 0)).toBe(true);
+  });
+
+  it('draws text through canvas.text', async () => {
+    const clockface = defineClockface({
+      resolution: 64,
+      render: ({ canvas }) => {
+        canvas.clear();
+        canvas.text('Hi', 0, 0, { fill: '#ff0000' });
+      }
+    });
+
+    await clockface.ready;
+
+    expect(clockface.flatBuffer.some((value) => value !== 0)).toBe(true);
   });
 });

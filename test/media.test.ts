@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
-import { Clockface } from '../src/index.js';
+import { defineClockface, type PreparedMediaAsset } from '../src/index.js';
 import {
   createMediaAnimation,
   decodeGifFile,
@@ -12,12 +12,9 @@ import {
 
 describe('media helpers', () => {
   it('normalizes playback speed and draws frames', async () => {
-    const clockface = new Clockface({
+    const clockface = defineClockface({
       resolution: 1,
-      data: {},
-      inputs: [],
-      init: () => undefined,
-      main: () => undefined
+      render: () => undefined
     });
 
     await clockface.ready;
@@ -79,12 +76,9 @@ describe('media helpers', () => {
       bytes
     };
     const frame = await decodeImageFile(file, { resolution: 1 });
-    const clockface = new Clockface({
+    const clockface = defineClockface({
       resolution: 1,
-      data: {},
-      inputs: [],
-      init: () => undefined,
-      main: () => undefined
+      render: () => undefined
     });
 
     await clockface.ready;
@@ -115,12 +109,9 @@ describe('media helpers', () => {
       size: bytes.byteLength,
       bytes
     };
-    const clockface = new Clockface({
+    const clockface = defineClockface({
       resolution: 3,
-      data: {},
-      inputs: [],
-      init: () => undefined,
-      main: () => undefined
+      render: () => undefined
     });
 
     await clockface.ready;
@@ -131,5 +122,45 @@ describe('media helpers', () => {
     expect(clockface.buffer[5]).toEqual([0, 255, 0]);
     expect(clockface.buffer[7]).toEqual([0, 255, 0]);
     expect(clockface.buffer[8]).toEqual([0, 255, 0]);
+  });
+
+  it('draws raw and prepared media through canvas.media', async () => {
+    const bytes = new Uint8Array(
+      await sharp({
+        create: {
+          width: 1,
+          height: 1,
+          channels: 3,
+          background: { r: 255, g: 0, b: 0 }
+        }
+      })
+        .png()
+        .toBuffer()
+    );
+    const file = {
+      name: 'red.png',
+      type: 'image/png',
+      size: bytes.byteLength,
+      bytes
+    };
+    const prepared: PreparedMediaAsset = {
+      type: 'image',
+      frame: {
+        width: 1,
+        height: 1,
+        pixels: [[0, 0, 255]]
+      }
+    };
+    const clockface = defineClockface({
+      resolution: 2,
+      render: () => undefined
+    });
+
+    await clockface.ready;
+    clockface.context.canvas.media(file, 'image', { x: 0, y: 0, width: 1, height: 1 });
+    clockface.context.canvas.media(prepared, 'image', { x: 1, y: 1 });
+
+    expect(clockface.buffer[0]).toEqual([0, 0, 0]);
+    expect(clockface.buffer[3]).toEqual([0, 0, 255]);
   });
 });
