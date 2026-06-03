@@ -71,10 +71,12 @@ export type ClockfaceInput = {
 export type ClockfaceInputRow = ClockfaceInput | ClockfaceInput[];
 
 export type ClockfaceLifecycleFunction = (context: ClockfaceContext) => void | Promise<void>;
+export type ClockfaceResolutionFunction = (context: ClockfaceContext) => number;
 export type ClockfaceUpdateIntervalFunction = (context: ClockfaceContext) => number;
+export type ClockfaceResolution = number | ClockfaceResolutionFunction;
 
 export type ClockfaceOptions = {
-  resolution: number;
+  resolution: ClockfaceResolution;
   data: ClockfaceData;
   inputs: ClockfaceInputRow[];
   updateIntervalMs?: number;
@@ -175,7 +177,7 @@ export type FriendlyClockfaceInput<TData extends ClockfaceData = ClockfaceData> 
   };
 
 export type FriendlyClockfaceOptions<TSchema extends DataSchema> = {
-  resolution: number;
+  resolution: number | ((context: FriendlyClockfaceContext<InferData<TSchema>>) => number);
   data?: TSchema;
   inputs?: FriendlyClockfaceInput<InferData<TSchema>>[] | FriendlyClockfaceInput<InferData<TSchema>>[][];
   interval?: number;
@@ -200,11 +202,12 @@ export type ClockfacePersistenceStore = {
 let persistenceStore: ClockfacePersistenceStore | undefined;
 
 export class Clockface {
-  readonly resolution: number;
+  private currentResolution: number;
+  private readonly resolutionOption: ClockfaceResolution;
   readonly data: ClockfaceData;
   readonly inputs: ClockfaceInput[];
   readonly inputRows: ClockfaceInput[][];
-  readonly buffer: ClockfacePixelBuffer;
+  private pixelBuffer: ClockfacePixelBuffer;
   readonly ready: Promise<void>;
   readonly frameQueueSize: number;
   private readonly defaultUpdateIntervalMs: number;
@@ -235,11 +238,12 @@ export class Clockface {
     start,
     stop
   }: ClockfaceOptions) {
-    this.resolution = resolution;
+    this.resolutionOption = resolution;
     this.data = data;
     this.inputRows = normalizeInputRows(inputs);
     this.inputs = this.inputRows.flat();
-    this.buffer = createBuffer(resolution);
+    this.currentResolution = this.resolveResolution(64, createBuffer(64));
+    this.pixelBuffer = createBuffer(this.currentResolution);
     this.defaultUpdateIntervalMs = normalizeUpdateInterval(updateIntervalMs);
     this.getUpdateIntervalMsFn = getUpdateIntervalMs;
     this.frameQueueSize = normalizeFrameQueueSize(frameQueueSize);
@@ -252,13 +256,23 @@ export class Clockface {
     this.persistenceReady = this.ready;
   }
 
+  get resolution() {
+    return this.ensureResolution();
+  }
+
+  get buffer() {
+    this.ensureResolution();
+    return this.pixelBuffer;
+  }
+
   get context(): ClockfaceContext {
+    this.ensureResolution();
     return {
-      resolution: this.resolution,
+      resolution: this.currentResolution,
       data: this.data,
       inputs: this.inputs,
-      buffer: this.buffer,
-      canvas: createCanvas(this.resolution, this.buffer, this.mediaCache),
+      buffer: this.pixelBuffer,
+      canvas: createCanvas(this.currentResolution, this.pixelBuffer, this.mediaCache),
       persistence: this.persistence
     };
   }
@@ -367,14 +381,51 @@ export class Clockface {
       state: { ...this.persistedState }
     });
   }
+
+  private ensureResolution() {
+    const nextResolution = this.resolveResolution(this.currentResolution, this.pixelBuffer);
+
+    if (nextResolution !== this.currentResolution) {
+      this.currentResolution = nextResolution;
+      this.pixelBuffer = createBuffer(nextResolution);
+      this.mediaCache.clear();
+    }
+
+    return this.currentResolution;
+  }
+
+  private resolveResolution(currentResolution: number, buffer: ClockfacePixelBuffer) {
+    if (typeof this.resolutionOption === 'number') {
+      return normalizeResolution(this.resolutionOption);
+    }
+
+    return normalizeResolution(this.resolutionOption(this.createContext(currentResolution, buffer)));
+  }
+
+  private createContext(resolution: number, buffer: ClockfacePixelBuffer): ClockfaceContext {
+    return {
+      resolution,
+      data: this.data,
+      inputs: this.inputs,
+      buffer,
+      canvas: createCanvas(resolution, buffer, this.mediaCache),
+      persistence: this.persistence
+    };
+  }
 }
 
 function createBuffer(resolution: number): ClockfacePixelBuffer {
+  const normalizedResolution = normalizeResolution(resolution);
+
+  return Array.from({ length: normalizedResolution * normalizedResolution }, () => [0, 0, 0]);
+}
+
+function normalizeResolution(resolution: number) {
   if (!Number.isInteger(resolution) || resolution <= 0) {
     throw new Error('Clockface resolution must be a positive integer.');
   }
 
-  return Array.from({ length: resolution * resolution }, () => [0, 0, 0]);
+  return resolution;
 }
 
 function normalizeInputRows(inputs: ClockfaceInputRow[]) {
@@ -497,7 +548,7 @@ export function defineClockface<TSchema extends DataSchema = Record<string, neve
   ) as InferData<TSchema>;
 
   return new Clockface({
-    resolution: options.resolution,
+    resolution: options.resolution as ClockfaceResolution,
     data: defaultData,
     inputs: normalizeFriendlyInputs(options.inputs ?? []),
     updateIntervalMs: options.interval,

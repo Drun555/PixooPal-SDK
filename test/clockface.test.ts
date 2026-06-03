@@ -58,6 +58,42 @@ describe('Clockface', () => {
     expect(clockface.frameQueueSize).toBe(1);
   });
 
+  it('supports dynamic resolution from clockface data', async () => {
+    const clockface = defineClockface({
+      resolution: (context) => Number(context.data.size),
+      data: {
+        size: data.select('2')
+      },
+      inputs: [
+        input.select('size', 'Size', [
+          { value: '2', label: '2x2' },
+          { value: '3', label: '3x3' }
+        ])
+      ],
+      render: ({ canvas, resolution }) => {
+        canvas.clear();
+        canvas.pixel(resolution - 1, resolution - 1, '#ffffff');
+      }
+    });
+
+    await clockface.ready;
+
+    expect(clockface.resolution).toBe(2);
+    expect(clockface.buffer).toHaveLength(4);
+    expect(clockface.getFrame()).toEqual({
+      size: 2,
+      buffer: [0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255]
+    });
+
+    await clockface.submitInput('size', '3');
+    await clockface.render();
+
+    expect(clockface.resolution).toBe(3);
+    expect(clockface.buffer).toHaveLength(9);
+    expect(clockface.getFrame().size).toBe(3);
+    expect(clockface.buffer[8]).toEqual([255, 255, 255]);
+  });
+
   it('draws primitives with clipping, stroke, fill and opacity', async () => {
     const clockface = defineClockface({
       resolution: 5,
