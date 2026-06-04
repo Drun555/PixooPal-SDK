@@ -14,7 +14,7 @@ export type BitmapTextClip = {
 };
 
 export type DrawBitmapTextOptions = {
-  buffer: number[];
+  buffer: Uint8Array;
   size: number;
   text: string;
   x: number;
@@ -171,7 +171,7 @@ export function drawBitmapText({
 }
 
 function drawGlyph(
-  buffer: number[],
+  buffer: Uint8Array,
   size: number,
   atlas: BitmapAtlas,
   glyph: BitmapGlyph,
@@ -202,7 +202,7 @@ function drawGlyph(
 }
 
 function drawEmoji(
-  buffer: number[],
+  buffer: Uint8Array,
   size: number,
   atlas: BitmapAtlas,
   emoji: BitmapEmoji,
@@ -235,7 +235,7 @@ function drawEmoji(
   }
 }
 
-function setFlatPixel(buffer: number[], size: number, x: number, y: number, color: BitmapTextColor) {
+function setFlatPixel(buffer: Uint8Array, size: number, x: number, y: number, color: BitmapTextColor) {
   if (x < 0 || y < 0 || x >= size || y >= size) {
     return;
   }

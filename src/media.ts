@@ -6,7 +6,7 @@ import { extname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { decompressFrames, parseGIF, type ParsedFrame } from 'gifuct-js';
 import sharp from 'sharp';
-import type { ClockfaceContext, ClockfaceFileInputValue, ClockfacePixel } from './index.js';
+import type { ClockfaceContext, ClockfaceFileInputValue } from './index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -29,7 +29,7 @@ export type ImageBackground = {
 };
 
 export type MediaFrame = {
-  pixels: ClockfacePixel[];
+  pixels: Uint8Array;
   delay: number;
 };
 
@@ -47,7 +47,7 @@ export type GifAnimation = MediaAnimation;
 export type ImageFrame = {
   width: number;
   height: number;
-  pixels: ClockfacePixel[];
+  pixels: Uint8Array;
 };
 
 export type DecodeGifOptions = {
@@ -163,15 +163,7 @@ export async function decodeVideoFile(file: ClockfaceFileInputValue, options: De
 
     for (let frameIndex = 0; frameIndex < limitedFrameCount; frameIndex += 1) {
       const offset = frameIndex * frameSize;
-      const pixels: ClockfacePixel[] = [];
-
-      for (let index = 0; index < frameSize; index += 3) {
-        pixels.push([
-          stdout[offset + index] ?? 0,
-          stdout[offset + index + 1] ?? 0,
-          stdout[offset + index + 2] ?? 0
-        ]);
-      }
+      const pixels = Uint8Array.from(stdout.subarray(offset, offset + frameSize));
 
       frames.push({
         pixels,
@@ -231,8 +223,11 @@ export function createMediaAnimation(frames: MediaFrame[]): MediaAnimation {
 }
 
 export function drawMediaFrame(context: ClockfaceContext, frame: MediaFrame) {
-  for (let index = 0; index < context.buffer.length; index += 1) {
-    context.buffer[index] = [...(frame.pixels[index] ?? [0, 0, 0])];
+  const expectedLength = context.resolution * context.resolution * 3;
+  context.buffer.set(frame.pixels.subarray(0, expectedLength));
+
+  if (frame.pixels.length < expectedLength) {
+    context.buffer.fill(0, frame.pixels.length, expectedLength);
   }
 }
 
@@ -258,13 +253,11 @@ export function drawImageFrame(
         continue;
       }
 
-      const sourcePixel = frame.pixels[y * frame.width + x];
-
-      if (!sourcePixel) {
-        continue;
-      }
-
-      context.buffer[targetY * context.resolution + targetX] = [...sourcePixel];
+      const sourceIndex = (x + y * frame.width) * 3;
+      const targetIndex = (targetX + targetY * context.resolution) * 3;
+      context.buffer[targetIndex] = frame.pixels[sourceIndex] ?? 0;
+      context.buffer[targetIndex + 1] = frame.pixels[sourceIndex + 1] ?? 0;
+      context.buffer[targetIndex + 2] = frame.pixels[sourceIndex + 2] ?? 0;
     }
   }
 }
@@ -425,13 +418,7 @@ async function resizeToResolution(canvas: Uint8ClampedArray, width: number, heig
     .raw()
     .toBuffer();
 
-  const pixels: ClockfacePixel[] = [];
-
-  for (let index = 0; index < resolution * resolution * 3; index += 3) {
-    pixels.push([resized[index] ?? 0, resized[index + 1] ?? 0, resized[index + 2] ?? 0]);
-  }
-
-  return pixels;
+  return Uint8Array.from(resized);
 }
 
 async function decodeImageBytes(
@@ -448,16 +435,10 @@ async function decodeImageBytes(
     .raw()
     .toBuffer();
 
-  const pixels: ClockfacePixel[] = [];
-
-  for (let index = 0; index < options.width * options.height * 3; index += 3) {
-    pixels.push([resized[index] ?? 0, resized[index + 1] ?? 0, resized[index + 2] ?? 0]);
-  }
-
   return {
     width: options.width,
     height: options.height,
-    pixels
+    pixels: Uint8Array.from(resized)
   };
 }
 

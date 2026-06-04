@@ -4,7 +4,7 @@ import { drawBitmapText, getBitmapTextRenderHeight, measureBitmapText } from '..
 
 describe('bitmap text helpers', () => {
   it('measures and draws text into a flat buffer', async () => {
-    const buffer = new Array(64 * 64 * 3).fill(0);
+    const buffer = new Uint8Array(64 * 64 * 3);
 
     expect(measureBitmapText('Hi')).toBeGreaterThan(0);
     expect(getBitmapTextRenderHeight('Hi')).toBeGreaterThan(0);
@@ -32,6 +32,6 @@ describe('bitmap text helpers', () => {
 
     await clockface.ready;
 
-    expect(clockface.flatBuffer.some((value) => value !== 0)).toBe(true);
+    expect(clockface.buffer.some((value) => value !== 0)).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@pixoopal/clockface",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "Clockface SDK for PixooPal.",
   "type": "module",
   "main": "./dist/index.js",

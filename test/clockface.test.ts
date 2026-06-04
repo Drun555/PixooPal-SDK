@@ -5,8 +5,14 @@ import {
   data,
   defineClockface,
   input,
+  type ClockfacePixelBuffer,
   type PersistedClockfaceEntry
 } from '../src/index.js';
+
+function pixelAt(buffer: ClockfacePixelBuffer, size: number, x: number, y: number) {
+  const index = (x + y * size) * 3;
+  return Array.from(buffer.slice(index, index + 3));
+}
 
 describe('Clockface', () => {
   it('creates a buffer and runs lifecycle hooks', async () => {
@@ -27,8 +33,8 @@ describe('Clockface', () => {
 
     await clockface.ready;
 
-    expect(clockface.buffer).toHaveLength(4);
-    expect(clockface.flatBuffer.slice(0, 3)).toEqual([1, 2, 3]);
+    expect(clockface.buffer).toHaveLength(12);
+    expect(pixelAt(clockface.buffer, 2, 0, 0)).toEqual([1, 2, 3]);
     expect(calls).toEqual(['setup', 'render']);
   });
 
@@ -44,8 +50,8 @@ describe('Clockface', () => {
     clockface.context.canvas.pixel(1, 1, '#00ff00');
     await clockface.render();
 
-    expect(clockface.buffer[0]).toEqual([255, 0, 0]);
-    expect(clockface.buffer[3]).toEqual([0, 255, 0]);
+    expect(pixelAt(clockface.buffer, 2, 0, 0)).toEqual([255, 0, 0]);
+    expect(pixelAt(clockface.buffer, 2, 1, 1)).toEqual([0, 255, 0]);
   });
 
   it('exposes the configured frame queue size', () => {
@@ -79,19 +85,19 @@ describe('Clockface', () => {
     await clockface.ready;
 
     expect(clockface.resolution).toBe(2);
-    expect(clockface.buffer).toHaveLength(4);
-    expect(clockface.getFrame()).toEqual({
-      size: 2,
-      buffer: [0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255]
-    });
+    expect(clockface.buffer).toHaveLength(12);
+    expect(clockface.getFrame().size).toBe(2);
+    expect(Array.from(clockface.getFrame().buffer)).toEqual([
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255
+    ]);
 
     await clockface.submitInput('size', '3');
     await clockface.render();
 
     expect(clockface.resolution).toBe(3);
-    expect(clockface.buffer).toHaveLength(9);
+    expect(clockface.buffer).toHaveLength(27);
     expect(clockface.getFrame().size).toBe(3);
-    expect(clockface.buffer[8]).toEqual([255, 255, 255]);
+    expect(pixelAt(clockface.buffer, 3, 2, 2)).toEqual([255, 255, 255]);
   });
 
   it('draws primitives with clipping, stroke, fill and opacity', async () => {
@@ -107,9 +113,9 @@ describe('Clockface', () => {
 
     await clockface.ready;
 
-    expect(clockface.buffer[0]).toEqual([255, 0, 0]);
-    expect(clockface.buffer[2 + 1 * 5]).toEqual([0, 255, 0]);
-    expect(clockface.buffer[24]).toEqual([0, 0, 128]);
+    expect(pixelAt(clockface.buffer, 5, 0, 0)).toEqual([255, 0, 0]);
+    expect(pixelAt(clockface.buffer, 5, 2, 1)).toEqual([0, 255, 0]);
+    expect(pixelAt(clockface.buffer, 5, 4, 4)).toEqual([0, 0, 128]);
   });
 
   it('submits helper inputs and persists through an injected store', async () => {

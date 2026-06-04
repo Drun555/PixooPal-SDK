@@ -27,7 +27,7 @@ export type ClockfacePersistedState = Record<string, unknown>;
 export type ClockfacePixel = [number, number, number];
 export type Pixel = ClockfacePixel;
 export type Color = Pixel | string;
-export type ClockfacePixelBuffer = ClockfacePixel[];
+export type ClockfacePixelBuffer = Uint8Array;
 export type ClockfaceFileInputValue = {
   name: string;
   type: string;
@@ -146,12 +146,13 @@ export type ClockfaceCanvas = {
   readonly size: number;
   readonly buffer: ClockfacePixelBuffer;
   clear(fill?: Color): void;
+  getPixel(x: number, y: number): Pixel;
   pixel(x: number, y: number, colorOrOptions: Color | PixelDrawOptions): void;
+  blendPixel(x: number, y: number, color: Color, opacity: number): void;
   rect(x: number, y: number, width: number, height: number, options?: Color | DrawStyleOptions): void;
   circle(x: number, y: number, radius: number, options?: Color | DrawStyleOptions): void;
   text(text: string, x: number, y: number, options?: TextDrawOptions): void;
   media(asset: MediaAsset, type: MediaType, options?: MediaDrawOptions): void;
-  toFlatBuffer(): number[];
 };
 
 type MediaCacheEntry =
@@ -310,14 +311,10 @@ export class Clockface {
     };
   }
 
-  get flatBuffer() {
-    return this.buffer.flat();
-  }
-
   getFrame() {
     return {
       size: this.resolution,
-      buffer: this.flatBuffer
+      buffer: this.buffer
     };
   }
 
@@ -487,7 +484,7 @@ export class Clockface {
 function createBuffer(resolution: number): ClockfacePixelBuffer {
   const normalizedResolution = normalizeResolution(resolution);
 
-  return Array.from({ length: normalizedResolution * normalizedResolution }, () => [0, 0, 0]);
+  return new Uint8Array(normalizedResolution * normalizedResolution * 3);
 }
 
 function normalizeResolution(resolution: number) {
@@ -690,13 +687,21 @@ function createCanvas(
     clear(fill: Color = color.black) {
       const pixel = parseColor(fill);
 
-      for (let index = 0; index < buffer.length; index += 1) {
-        buffer[index] = [...pixel];
+      for (let index = 0; index < buffer.length; index += 3) {
+        buffer[index] = pixel[0];
+        buffer[index + 1] = pixel[1];
+        buffer[index + 2] = pixel[2];
       }
+    },
+    getPixel(x: number, y: number) {
+      return readPixel(buffer, size, x, y);
     },
     pixel(x: number, y: number, colorOrOptions: Color | PixelDrawOptions) {
       const options = normalizePixelOptions(colorOrOptions);
       writePixel(buffer, size, x, y, parseColor(options.fill), options.opacity);
+    },
+    blendPixel(x: number, y: number, color: Color, opacity: number) {
+      writePixel(buffer, size, x, y, parseColor(color), normalizeOpacity(opacity));
     },
     rect(x: number, y: number, width: number, height: number, options: Color | DrawStyleOptions = {}) {
       const style = normalizeDrawStyle(options);
@@ -756,7 +761,7 @@ function createCanvas(
       const opacity = normalizeOpacity(options.opacity);
       const width = Math.min(size, measureBitmapText(text, options.fontName));
       const height = Math.min(size, getBitmapTextRenderHeight(text, options.fontName));
-      const mask = new Array(size * size * 3).fill(0);
+      const mask = new Uint8Array(size * size * 3);
 
       drawBitmapText({
         buffer: mask,
@@ -791,9 +796,6 @@ function createCanvas(
       const frame = getPreparedMediaFrame(prepared);
 
       drawFrameIntoBuffer(buffer, size, frame, options);
-    },
-    toFlatBuffer() {
-      return buffer.flat();
     }
   };
 }
@@ -864,6 +866,23 @@ function normalizeOpacity(value: number | undefined) {
   return clamp(Number.isFinite(value) ? value ?? 1 : 1, 0, 1);
 }
 
+function readPixel(buffer: ClockfacePixelBuffer, size: number, x: number, y: number): Pixel {
+  const targetX = Math.round(x);
+  const targetY = Math.round(y);
+
+  if (targetX < 0 || targetY < 0 || targetX >= size || targetY >= size) {
+    return color.black;
+  }
+
+  const index = (targetX + targetY * size) * 3;
+
+  return [
+    buffer[index] ?? 0,
+    buffer[index + 1] ?? 0,
+    buffer[index + 2] ?? 0
+  ];
+}
+
 function writePixel(
   buffer: ClockfacePixelBuffer,
   size: number,
@@ -879,9 +898,22 @@ function writePixel(
     return;
   }
 
-  const index = targetX + targetY * size;
-  const current = buffer[index] ?? color.black;
-  buffer[index] = opacity >= 1 ? [...fill] : color.mix(current, fill, opacity);
+  const index = (targetX + targetY * size) * 3;
+
+  if (opacity >= 1) {
+    buffer[index] = fill[0];
+    buffer[index + 1] = fill[1];
+    buffer[index + 2] = fill[2];
+    return;
+  }
+
+  buffer[index] = Math.round((buffer[index] ?? 0) + (fill[0] - (buffer[index] ?? 0)) * opacity);
+  buffer[index + 1] = Math.round(
+    (buffer[index + 1] ?? 0) + (fill[1] - (buffer[index + 1] ?? 0)) * opacity
+  );
+  buffer[index + 2] = Math.round(
+    (buffer[index + 2] ?? 0) + (fill[2] - (buffer[index + 2] ?? 0)) * opacity
+  );
 }
 
 function drawFrameIntoBuffer(
@@ -890,7 +922,7 @@ function drawFrameIntoBuffer(
   frame: ImageFrame | MediaFrame,
   options: MediaDrawOptions
 ) {
-  const sourceWidth = 'width' in frame ? frame.width : Math.sqrt(frame.pixels.length);
+  const sourceWidth = 'width' in frame ? frame.width : Math.sqrt(frame.pixels.length / 3);
   const sourceHeight = 'height' in frame ? frame.height : sourceWidth;
   const targetX = Math.round(options.x ?? 0);
   const targetY = Math.round(options.y ?? 0);
@@ -902,15 +934,32 @@ function drawFrameIntoBuffer(
 
     for (let x = 0; x < targetWidth; x += 1) {
       const sourceX = Math.min(sourceWidth - 1, Math.floor((x / targetWidth) * sourceWidth));
-      const sourcePixel = frame.pixels[sourceX + sourceY * sourceWidth];
+      const sourceIndex = (sourceX + sourceY * sourceWidth) * 3;
 
-      if (!sourcePixel) {
-        continue;
-      }
-
-      writePixel(buffer, size, targetX + x, targetY + y, sourcePixel);
+      writePixelFromBuffer(buffer, size, targetX + x, targetY + y, frame.pixels, sourceIndex);
     }
   }
+}
+
+function writePixelFromBuffer(
+  buffer: ClockfacePixelBuffer,
+  size: number,
+  x: number,
+  y: number,
+  source: Uint8Array,
+  sourceIndex: number
+) {
+  const targetX = Math.round(x);
+  const targetY = Math.round(y);
+
+  if (targetX < 0 || targetY < 0 || targetX >= size || targetY >= size) {
+    return;
+  }
+
+  const targetIndex = (targetX + targetY * size) * 3;
+  buffer[targetIndex] = source[sourceIndex] ?? 0;
+  buffer[targetIndex + 1] = source[sourceIndex + 1] ?? 0;
+  buffer[targetIndex + 2] = source[sourceIndex + 2] ?? 0;
 }
 
 function isPreparedMediaAsset(asset: MediaAsset): asset is PreparedMediaAsset {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
-import { defineClockface, type PreparedMediaAsset } from '../src/index.js';
+import { defineClockface, type ClockfacePixelBuffer, type PreparedMediaAsset } from '../src/index.js';
 import {
   createMediaAnimation,
   decodeGifFile,
@@ -10,6 +10,11 @@ import {
   normalizeGifPlaybackSpeed
 } from '../src/media.js';
 
+function pixelAt(buffer: ClockfacePixelBuffer, size: number, x: number, y: number) {
+  const index = (x + y * size) * 3;
+  return Array.from(buffer.slice(index, index + 3));
+}
+
 describe('media helpers', () => {
   it('normalizes playback speed and draws frames', async () => {
     const clockface = defineClockface({
@@ -18,9 +23,9 @@ describe('media helpers', () => {
     });
 
     await clockface.ready;
-    drawMediaFrame(clockface.context, { pixels: [[9, 8, 7]], delay: 50 });
+    drawMediaFrame(clockface.context, { pixels: Uint8Array.from([9, 8, 7]), delay: 50 });
 
-    expect(clockface.buffer[0]).toEqual([9, 8, 7]);
+    expect(pixelAt(clockface.buffer, 1, 0, 0)).toEqual([9, 8, 7]);
     expect(normalizeGifPlaybackSpeed('bad')).toBe(1);
     expect(normalizeGifPlaybackSpeed(99)).toBe(8);
   });
@@ -30,12 +35,12 @@ describe('media helpers', () => {
     vi.setSystemTime(1000);
 
     const animation = createMediaAnimation([
-      { pixels: [[1, 0, 0]], delay: 100 },
-      { pixels: [[0, 1, 0]], delay: 100 }
+      { pixels: Uint8Array.from([1, 0, 0]), delay: 100 },
+      { pixels: Uint8Array.from([0, 1, 0]), delay: 100 }
     ]);
 
     vi.setSystemTime(1150);
-    expect(animation.getCurrentFrame().pixels[0]).toEqual([0, 1, 0]);
+    expect(Array.from(animation.getCurrentFrame().pixels)).toEqual([0, 1, 0]);
 
     vi.useRealTimers();
   });
@@ -53,7 +58,7 @@ describe('media helpers', () => {
     );
 
     expect(frames).toHaveLength(1);
-    expect(frames[0].pixels).toHaveLength(1);
+    expect(frames[0].pixels).toHaveLength(3);
   });
 
   it('decodes and draws a static image file', async () => {
@@ -84,10 +89,10 @@ describe('media helpers', () => {
     await clockface.ready;
     expect(frame.width).toBe(1);
     expect(frame.height).toBe(1);
-    expect(frame.pixels).toEqual([[255, 0, 0]]);
+    expect(Array.from(frame.pixels)).toEqual([255, 0, 0]);
 
     await drawImageFile(clockface.context, file);
-    expect(clockface.buffer[0]).toEqual([255, 0, 0]);
+    expect(pixelAt(clockface.buffer, 1, 0, 0)).toEqual([255, 0, 0]);
   });
 
   it('draws a static image at an offset', async () => {
@@ -117,11 +122,11 @@ describe('media helpers', () => {
     await clockface.ready;
     await drawImageFile(clockface.context, file, { width: 2, height: 2, fit: 'fill', x: 1, y: 1 });
 
-    expect(clockface.buffer[0]).toEqual([0, 0, 0]);
-    expect(clockface.buffer[4]).toEqual([0, 255, 0]);
-    expect(clockface.buffer[5]).toEqual([0, 255, 0]);
-    expect(clockface.buffer[7]).toEqual([0, 255, 0]);
-    expect(clockface.buffer[8]).toEqual([0, 255, 0]);
+    expect(pixelAt(clockface.buffer, 3, 0, 0)).toEqual([0, 0, 0]);
+    expect(pixelAt(clockface.buffer, 3, 1, 1)).toEqual([0, 255, 0]);
+    expect(pixelAt(clockface.buffer, 3, 2, 1)).toEqual([0, 255, 0]);
+    expect(pixelAt(clockface.buffer, 3, 1, 2)).toEqual([0, 255, 0]);
+    expect(pixelAt(clockface.buffer, 3, 2, 2)).toEqual([0, 255, 0]);
   });
 
   it('draws raw and prepared media through canvas.media', async () => {
@@ -148,7 +153,7 @@ describe('media helpers', () => {
       frame: {
         width: 1,
         height: 1,
-        pixels: [[0, 0, 255]]
+        pixels: Uint8Array.from([0, 0, 255])
       }
     };
     const clockface = defineClockface({
@@ -160,8 +165,8 @@ describe('media helpers', () => {
     clockface.context.canvas.media(file, 'image', { x: 0, y: 0, width: 1, height: 1 });
     clockface.context.canvas.media(prepared, 'image', { x: 1, y: 1 });
 
-    expect(clockface.buffer[0]).toEqual([0, 0, 0]);
-    expect(clockface.buffer[3]).toEqual([0, 0, 255]);
+    expect(pixelAt(clockface.buffer, 2, 0, 0)).toEqual([0, 0, 0]);
+    expect(pixelAt(clockface.buffer, 2, 1, 1)).toEqual([0, 0, 255]);
   });
 
   it('accepts imported data URL media assets', async () => {
@@ -188,6 +193,6 @@ describe('media helpers', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     clockface.context.canvas.media(dataUrl, 'image');
 
-    expect(clockface.buffer[0]).toEqual([255, 0, 0]);
+    expect(pixelAt(clockface.buffer, 1, 0, 0)).toEqual([255, 0, 0]);
   });
 });
