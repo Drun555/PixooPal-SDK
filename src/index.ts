@@ -41,6 +41,15 @@ export type ClockfacePersistence = {
   set(key: string, value: unknown): void;
   update(values: ClockfacePersistedState): void;
 };
+export type ClockfaceHomeAssistant = {
+  readonly connected: boolean;
+  renderJinja(template: string, variables?: Record<string, unknown>): Promise<string>;
+};
+export type ClockfaceLifecycle = {
+  cleanup(dispose: () => void): void;
+  setInterval(handler: () => void, ms: number): ReturnType<typeof setInterval>;
+  setTimeout(handler: () => void, ms: number): ReturnType<typeof setTimeout>;
+};
 
 export type ClockfaceContext = {
   resolution: number;
@@ -49,6 +58,8 @@ export type ClockfaceContext = {
   buffer: ClockfacePixelBuffer;
   canvas: ClockfaceCanvas;
   persistence: ClockfacePersistence;
+  homeAssistant: ClockfaceHomeAssistant;
+  lifecycle: ClockfaceLifecycle;
 };
 
 export type ClockfaceInputSubmitFunction = (
@@ -200,6 +211,14 @@ export type ClockfacePersistenceStore = {
 };
 
 let persistenceStore: ClockfacePersistenceStore | undefined;
+let homeAssistantClient: ClockfaceHomeAssistant = {
+  get connected() {
+    return false;
+  },
+  async renderJinja() {
+    throw new Error('Home Assistant integration is not connected.');
+  }
+};
 
 export class Clockface {
   private currentResolution: number;
@@ -220,9 +239,21 @@ export class Clockface {
   private persistedState: ClockfacePersistedState;
   private persistenceReady: Promise<void>;
   private readonly mediaCache = new Map<object | string, MediaCacheEntry>();
+  private readonly runtimeDisposers = new Set<() => void>();
 
   static configurePersistence(store: ClockfacePersistenceStore | undefined) {
     persistenceStore = store;
+  }
+
+  static configureHomeAssistant(client: ClockfaceHomeAssistant | undefined) {
+    homeAssistantClient = client ?? {
+      get connected() {
+        return false;
+      },
+      async renderJinja() {
+        throw new Error('Home Assistant integration is not connected.');
+      }
+    };
   }
 
   constructor({
@@ -273,7 +304,9 @@ export class Clockface {
       inputs: this.inputs,
       buffer: this.pixelBuffer,
       canvas: createCanvas(this.currentResolution, this.pixelBuffer, this.mediaCache),
-      persistence: this.persistence
+      persistence: this.persistence,
+      homeAssistant: homeAssistantClient,
+      lifecycle: this.lifecycle
     };
   }
 
@@ -363,7 +396,11 @@ export class Clockface {
 
   async stop() {
     await this.waitForPersistence();
-    await this.stopFn?.(this.context);
+    try {
+      await this.stopFn?.(this.context);
+    } finally {
+      this.clearRuntimeDisposers();
+    }
   }
 
   private async run() {
@@ -409,8 +446,41 @@ export class Clockface {
       inputs: this.inputs,
       buffer,
       canvas: createCanvas(resolution, buffer, this.mediaCache),
-      persistence: this.persistence
+      persistence: this.persistence,
+      homeAssistant: homeAssistantClient,
+      lifecycle: this.lifecycle
     };
+  }
+
+  private get lifecycle(): ClockfaceLifecycle {
+    return {
+      cleanup: (dispose) => {
+        this.runtimeDisposers.add(dispose);
+      },
+      setInterval: (handler, ms) => {
+        const timer = setInterval(handler, ms);
+        this.runtimeDisposers.add(() => clearInterval(timer));
+        return timer;
+      },
+      setTimeout: (handler, ms) => {
+        const timer = setTimeout(() => {
+          this.runtimeDisposers.delete(dispose);
+          handler();
+        }, ms);
+        const dispose = () => clearTimeout(timer);
+        this.runtimeDisposers.add(dispose);
+        return timer;
+      }
+    };
+  }
+
+  private clearRuntimeDisposers() {
+    const disposers = [...this.runtimeDisposers];
+    this.runtimeDisposers.clear();
+
+    for (const dispose of disposers) {
+      dispose();
+    }
   }
 }
 
