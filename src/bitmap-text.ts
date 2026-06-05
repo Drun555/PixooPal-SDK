@@ -57,6 +57,12 @@ type BitmapEmoji = {
   codepoints: string[];
 };
 
+type BitmapEmojiCrop = {
+  top: number;
+  bottom: number;
+  height: number;
+};
+
 type BitmapEmojiManifest = {
   sheet: string;
   cellSize: number;
@@ -105,11 +111,13 @@ const textSegmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
 let bitmapTextAssets = createDefaultAssets();
 let bitmapFonts: Map<string, LoadedBitmapFont> | undefined;
 let emojiAtlas: BitmapAtlas | undefined;
+let emojiCropCache = new Map<number, BitmapEmojiCrop>();
 
 export function configureBitmapTextAssets(assets: BitmapTextAssets) {
   bitmapTextAssets = createDefaultAssets(assets);
   bitmapFonts = undefined;
   emojiAtlas = undefined;
+  emojiCropCache = new Map();
 }
 
 export function getBitmapTextLineHeight(fontName = DEFAULT_FONT_NAME) {
@@ -118,10 +126,16 @@ export function getBitmapTextLineHeight(fontName = DEFAULT_FONT_NAME) {
 
 export function getBitmapTextRenderHeight(text: string, fontName = DEFAULT_FONT_NAME) {
   const bitmapFont = getBitmapFont(fontName).font;
+  const tokens = tokenizeBitmapText(text, bitmapFont);
+  const hasEmoji = tokens.some((token) => token.type === 'emoji');
+  const loadedEmojiAtlas = hasEmoji ? ensureEmojiAtlasReady() : undefined;
 
-  return tokenizeBitmapText(text, bitmapFont).reduce((height, token) => {
+  return tokens.reduce((height, token) => {
     if (token.type === 'emoji') {
-      return Math.max(height, token.emoji.height);
+      return Math.max(
+        height,
+        loadedEmojiAtlas ? getEmojiCrop(loadedEmojiAtlas, token.emoji).height : token.emoji.height
+      );
     }
 
     return Math.max(height, bitmapFont.lineHeight);
@@ -152,14 +166,17 @@ export function drawBitmapText({
   const bitmapFont = getBitmapFont(fontName);
   const atlas = ensureAtlasReady(bitmapFont);
   const tokens = tokenizeBitmapText(text, bitmapFont.font);
-  const renderHeight = getTokenRenderHeight(tokens, bitmapFont.font);
-  let loadedEmojiAtlas: BitmapAtlas | undefined;
+  const hasEmoji = tokens.some((token) => token.type === 'emoji');
+  let loadedEmojiAtlas = hasEmoji ? ensureEmojiAtlasReady() : undefined;
+  const renderHeight = getTokenRenderHeight(tokens, bitmapFont.font, loadedEmojiAtlas);
   let cursorX = x;
 
   for (const token of tokens) {
     if (token.type === 'emoji') {
       loadedEmojiAtlas ??= ensureEmojiAtlasReady();
-      drawEmoji(buffer, size, loadedEmojiAtlas, token.emoji, cursorX, y, clip);
+      const crop = getEmojiCrop(loadedEmojiAtlas, token.emoji);
+      const emojiY = y + Math.floor((renderHeight - crop.height) / 2);
+      drawEmoji(buffer, size, loadedEmojiAtlas, token.emoji, crop, cursorX, emojiY, clip);
       cursorX += token.xadvance;
       continue;
     }
@@ -206,14 +223,15 @@ function drawEmoji(
   size: number,
   atlas: BitmapAtlas,
   emoji: BitmapEmoji,
+  crop: BitmapEmojiCrop,
   startX: number,
   startY: number,
   clip: BitmapTextClip
 ) {
-  for (let y = 0; y < emoji.height; y += 1) {
+  for (let y = crop.top; y <= crop.bottom; y += 1) {
     for (let x = 0; x < emoji.width; x += 1) {
       const targetX = startX + x;
-      const targetY = startY + y;
+      const targetY = startY + y - crop.top;
 
       if (targetX < clip.left || targetX > clip.right || targetY < clip.top || targetY > clip.bottom) {
         continue;
@@ -294,10 +312,17 @@ function tokenizeBitmapText(text: string, bitmapFont: BitmapFont) {
   });
 }
 
-function getTokenRenderHeight(tokens: BitmapTextToken[], bitmapFont: BitmapFont) {
+function getTokenRenderHeight(
+  tokens: BitmapTextToken[],
+  bitmapFont: BitmapFont,
+  loadedEmojiAtlas?: BitmapAtlas
+) {
   return tokens.reduce((height, token) => {
     if (token.type === 'emoji') {
-      return Math.max(height, token.emoji.height);
+      return Math.max(
+        height,
+        loadedEmojiAtlas ? getEmojiCrop(loadedEmojiAtlas, token.emoji).height : token.emoji.height
+      );
     }
 
     return Math.max(height, bitmapFont.lineHeight);
@@ -328,7 +353,70 @@ function stripEmojiVariationSelectors(segment: string) {
 }
 
 function getGlyph(bitmapFont: BitmapFont, character: string) {
-  return bitmapFont.glyphs.get(character.codePointAt(0) ?? 0) ?? bitmapFont.fallback;
+  for (const candidate of getGlyphCandidates(character)) {
+    const glyph = bitmapFont.glyphs.get(candidate.codePointAt(0) ?? 0);
+
+    if (glyph) {
+      return glyph;
+    }
+  }
+
+  return bitmapFont.fallback;
+}
+
+function getGlyphCandidates(character: string) {
+  const candidates = [character, character.toUpperCase(), character.toLowerCase()];
+
+  return candidates.filter(
+    (candidate, index) => candidate && Array.from(candidate).length === 1 && candidates.indexOf(candidate) === index
+  );
+}
+
+function getEmojiCrop(atlas: BitmapAtlas, emoji: BitmapEmoji): BitmapEmojiCrop {
+  const cached = emojiCropCache.get(emoji.index);
+
+  if (cached) {
+    return cached;
+  }
+
+  let top = 0;
+  let bottom = emoji.height - 1;
+
+  while (top <= bottom && isEmojiRowEmpty(atlas, emoji, top)) {
+    top += 1;
+  }
+
+  while (bottom >= top && isEmojiRowEmpty(atlas, emoji, bottom)) {
+    bottom -= 1;
+  }
+
+  const crop =
+    top <= bottom
+      ? {
+          top,
+          bottom,
+          height: bottom - top + 1
+        }
+      : {
+          top: 0,
+          bottom: emoji.height - 1,
+          height: emoji.height
+        };
+
+  emojiCropCache.set(emoji.index, crop);
+  return crop;
+}
+
+function isEmojiRowEmpty(atlas: BitmapAtlas, emoji: BitmapEmoji, row: number) {
+  for (let x = 0; x < emoji.width; x += 1) {
+    const sourceIndex = (emoji.x + x + (emoji.y + row) * atlas.width) * 4;
+
+    if ((atlas.data[sourceIndex + 3] ?? 0) >= 128) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function loadBitmapFonts(assets: Required<BitmapTextAssets>) {
