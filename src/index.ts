@@ -44,6 +44,13 @@ export type ClockfacePersistence = {
 export type ClockfaceHomeAssistant = {
   readonly connected: boolean;
   renderJinja(template: string, variables?: Record<string, unknown>): Promise<string>;
+  fetchBinary(url: string): Promise<{ bytes: Uint8Array; type: string }>;
+  callService(
+    domain: string,
+    service: string,
+    data?: Record<string, unknown>,
+    options?: { returnResponse?: boolean }
+  ): Promise<unknown>;
 };
 export type ClockfaceLifecycle = {
   cleanup(dispose: () => void): void;
@@ -218,6 +225,12 @@ let homeAssistantClient: ClockfaceHomeAssistant = {
   },
   async renderJinja() {
     throw new Error('Home Assistant integration is not connected.');
+  },
+  async fetchBinary() {
+    throw new Error('Home Assistant integration is not connected.');
+  },
+  async callService() {
+    throw new Error('Home Assistant integration is not connected.');
   }
 };
 
@@ -252,6 +265,12 @@ export class Clockface {
         return false;
       },
       async renderJinja() {
+        throw new Error('Home Assistant integration is not connected.');
+      },
+      async fetchBinary() {
+        throw new Error('Home Assistant integration is not connected.');
+      },
+      async callService() {
         throw new Error('Home Assistant integration is not connected.');
       }
     };
